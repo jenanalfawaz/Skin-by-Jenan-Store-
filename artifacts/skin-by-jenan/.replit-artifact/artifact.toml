@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Skin by Jenan"
+description = "An English-language skincare storefront for Skin by Jenan, with natural face masks and eye patches, searchable product browsing, wishlist and cart interactions, and a personalized mask finder."
+version = "1.0.0"
+id = "artifacts/skin-by-jenan"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 20334
+
+[services.development]
+run = "pnpm --filter @workspace/skin-by-jenan run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/skin-by-jenan", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/skin-by-jenan/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "20334"
+BASE_PATH = "/"

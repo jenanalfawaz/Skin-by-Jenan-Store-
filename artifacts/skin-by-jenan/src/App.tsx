@@ -6,23 +6,31 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
 import { Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
 import { ArrowDown, ArrowRight, Check, ChevronDown, Heart, Leaf, Menu, Minus, Plus, Search, ShoppingBag, Sparkles, Star, Trash2, UserRound, X } from 'lucide-react';
+import {
+  addStoreCartItem,
+  addStoreWishlistItem,
+  getStoreState,
+  listStoreProducts,
+  removeStoreCartItem,
+  removeStoreWishlistItem,
+  setStoreCartItemQuantity,
+  subscribeStoreNewsletter,
+  submitStoreContact,
+  type StoreProduct,
+  type StoreState,
+} from '@/lib/store-api';
 
-type Product = { id: string; name: string; kind: string; price: number; rating: string; reviews: number; color: string; badge: string; desc: string; ingredients: string; categories: string[]; best: boolean; };
+type Product = StoreProduct;
 type CartRow = { id: string; qty: number };
-const products: Product[] = [
-  { id:'rose', name:'Rosewater Reset Mask', kind:'Nourishing face mask · 60 ml', price:28, rating:'4.9', reviews:128, color:'product-art', badge:'BEST SELLER', desc:'A soft, comforting clay mask for slow Sunday skin.', ingredients:'Rosewater · Kaolin · Oat', categories:['Face masks','Dryness','Dullness'], best:true },
-  { id:'matcha', name:'Matcha Melt Mask', kind:'Balancing face mask · 60 ml', price:26, rating:'4.8', reviews:86, color:'product-art-2', badge:'A JENAN FAVE', desc:'A fresh-feeling reset with a creamy, easy-rinse finish.', ingredients:'Matcha · Aloe · Green tea', categories:['Face masks','Oiliness','Texture'], best:true },
-  { id:'cloud', name:'Cloud Nine Eye Patches', kind:'Cooling eye patches · 30 pairs', price:32, rating:'4.9', reviews:174, color:'product-art-4', badge:'MOST LOVED', desc:'A little under-eye pause, whenever your day asks for it.', ingredients:'Cucumber · Hyaluronic acid · Rose', categories:['Eye patches','Tired eyes','Dryness'], best:true },
-  { id:'peach', name:'Peach Please Eye Patches', kind:'Brightening eye patches · 30 pairs', price:30, rating:'4.7', reviews:72, color:'product-art-3', badge:'JUST LANDED', desc:'Peachy-soft patches made for your morning ritual.', ingredients:'Peach extract · Caffeine · Aloe', categories:['Eye patches','Tired eyes','Dullness'], best:false },
-  { id:'duo', name:'The Mask Moment Duo', kind:'Ritual set · 2 full-size masks', price:48, rating:'4.9', reviews:94, color:'product-art', badge:'SAVE 15%', desc:'Your two-masks-in-rotation kind of self-care set.', ingredients:'Rosewater · Matcha · Oat', categories:['Face masks','Dryness','Oiliness'], best:true },
-];
 const money = (n:number) => `$${n.toFixed(2)}`;
-const readStore = <T,>(key:string, fallback:T):T => { try { const raw=localStorage.getItem(key); return raw ? JSON.parse(raw) as T : fallback; } catch { return fallback; } };
 const queryClient = new QueryClient();
 
 function Home() {
-  const [cart,setCart] = useState<CartRow[]>(()=>readStore('jenan-cart',[]));
-  const [wish,setWish] = useState<string[]>(()=>readStore('jenan-wishlist',[]));
+  const [products,setProducts] = useState<Product[]>([]);
+  const [cart,setCart] = useState<CartRow[]>([]);
+  const [wish,setWish] = useState<string[]>([]);
+  const [storeLoading,setStoreLoading] = useState(true);
+  const [storeError,setStoreError] = useState('');
   const [cartOpen,setCartOpen] = useState(false);
   const [wishOpen,setWishOpen] = useState(false);
   const [accountOpen,setAccountOpen] = useState(false);
@@ -35,8 +43,27 @@ function Home() {
   const [quizResult,setQuizResult] = useState<Product|null>(null);
   const [mobileMenu,setMobileMenu] = useState(false);
   const [sent,setSent] = useState(false);
-  useEffect(()=>{localStorage.setItem('jenan-cart',JSON.stringify(cart));},[cart]);
-  useEffect(()=>{localStorage.setItem('jenan-wishlist',JSON.stringify(wish));},[wish]);
+  const [contactError,setContactError] = useState('');
+  useEffect(()=>{
+    let active=true;
+    Promise.all([listStoreProducts(),getStoreState()])
+      .then(([catalog,state])=>{
+        if(!active)return;
+        setProducts(catalog);
+        applyStoreState(state);
+        setStoreError('');
+      })
+      .catch(()=>{
+        if(active)setStoreError('The store could not load right now. Please try refreshing the page.');
+      })
+      .finally(()=>{if(active)setStoreLoading(false);});
+    return ()=>{active=false;};
+  },[]);
+  const applyStoreState=(state:StoreState)=>{
+    setCart(state.cart.map(item=>({id:item.productId,qty:item.quantity})));
+    setWish(state.wishlist);
+    setStoreError('');
+  };
   const cartCount=cart.reduce((n,row)=>n+row.qty,0);
   const cartProducts=cart.map(row=>({ product:products.find(p=>p.id===row.id)!,qty:row.qty })).filter(row=>row.product);
   const subtotal=cartProducts.reduce((n,row)=>n+row.product.price*row.qty,0);
@@ -44,9 +71,27 @@ function Home() {
     const text=`${p.name} ${p.kind} ${p.ingredients} ${p.categories.join(' ')}`.toLowerCase();
     return text.includes(search.toLowerCase()) && (category==='Everything'||(category==='Best sellers'&&p.best)||p.categories.includes(category)) && (category!=='Best sellers'||p.best);
   }).sort((a,b)=>sort==='Price: low to high'?a.price-b.price:sort==='Price: high to low'?b.price-a.price:0),[search,category,sort]);
-  const add=(id:string)=>setCart(old=>{const found=old.find(r=>r.id===id);return found?old.map(r=>r.id===id?{...r,qty:r.qty+1}:r):[...old,{id,qty:1}];});
-  const changeQty=(id:string,by:number)=>setCart(old=>old.map(r=>r.id===id?{...r,qty:r.qty+by}:r).filter(r=>r.qty>0));
-  const toggleWish=(id:string)=>setWish(old=>old.includes(id)?old.filter(x=>x!==id):[...old,id]);
+  const add=async(id:string)=>{
+    try { applyStoreState(await addStoreCartItem({productId:id,quantity:1})); }
+    catch { setStoreError('We could not add that item to your bag. Please try again.'); }
+  };
+  const changeQty=async(id:string,by:number)=>{
+    const row=cart.find(item=>item.id===id);
+    if(!row)return;
+    try {
+      const quantity=row.qty+by;
+      applyStoreState(quantity<1?await removeStoreCartItem(id):await setStoreCartItemQuantity(id,{quantity}));
+    } catch { setStoreError('We could not update your bag. Please try again.'); }
+  };
+  const removeCartItem=async(id:string)=>{
+    try { applyStoreState(await removeStoreCartItem(id)); }
+    catch { setStoreError('We could not remove that item. Please try again.'); }
+  };
+  const toggleWish=async(id:string)=>{
+    try {
+      applyStoreState(wish.includes(id)?await removeStoreWishlistItem(id):await addStoreWishlistItem(id));
+    } catch { setStoreError('We could not update your wishlist. Please try again.'); }
+  };
   const productById=(id:string)=>products.find(p=>p.id===id)!;
   const runQuiz=()=>{const pick=quizGoal==='Tired eyes'?'cloud':quizGoal==='Oiliness'||quizSkin==='Oily'?'matcha':quizGoal==='Dullness'?'peach':'rose';setQuizResult(productById(pick));};
   const scrollTo=(id:string)=>{document.getElementById(id)?.scrollIntoView({behavior:'smooth'});setMobileMenu(false);setSearchOpen(false);};
@@ -69,6 +114,8 @@ function Home() {
       {mobileMenu&&<nav className="grid grid-cols-2 gap-2 border-t border-[#eadadd] px-5 py-4 lg:hidden">{nav.map(([label,id])=><button key={id} className="rounded-xl bg-[#f4e8e4] p-3 text-sm font-semibold" onClick={()=>scrollTo(id)}>{label}</button>)}</nav>}
     </header>
     <main>
+      {storeLoading&&<div className="bg-[#f2e6df] px-5 py-3 text-center text-sm text-[#765966]" role="status">Loading the feel-good shelf…</div>}
+      {storeError&&<div className="bg-[#fff0f1] px-5 py-3 text-center text-sm text-[#8c3449]" role="alert">{storeError}</div>}
       <section className="relative overflow-hidden px-5 pb-14 pt-10 md:pb-20 md:pt-16">
         <div className="mx-auto grid max-w-[1320px] items-center gap-8 md:grid-cols-[1.02fr_.98fr] lg:gap-16">
           <div className="relative z-10 py-4 md:py-10">
@@ -96,7 +143,7 @@ function Home() {
             <div className="flex flex-wrap gap-2">{['Everything','Face masks','Eye patches','Best sellers','Dryness','Tired eyes'].map(c=><button key={c} onClick={()=>{setCategory(c);scrollTo('shop');}} className={`rounded-full px-4 py-2 text-xs font-semibold transition ${category===c?'bg-[#542d3c] text-white':'bg-[#f4e9e5] text-[#73505e] hover:bg-[#efd8df]'}`} data-testid={`filter-${c.toLowerCase().replaceAll(' ','-')}`}>{c}</button>)}</div>
             <label className="flex items-center gap-2 text-xs font-semibold text-[#7b626c]">Sort by <span className="relative"><select value={sort} onChange={e=>setSort(e.target.value)} className="appearance-none rounded-full border border-[#e5d3d5] bg-transparent py-2 pl-3 pr-8 text-xs text-[#542d3c] outline-none" aria-label="Sort products"><option>Featured</option><option>Price: low to high</option><option>Price: high to low</option></select><ChevronDown size={13} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2"/></span></label>
           </div>
-          {filtered.length===0?<div className="rounded-3xl bg-[#f7eeea] px-6 py-16 text-center"><p className="serif text-3xl">No little rituals found</p><p className="mt-2 text-sm text-[#826b74]">Try another search or category.</p><button onClick={()=>{setSearch('');setCategory('Everything');}} className="mt-5 rounded-full bg-[#ce4f7d] px-5 py-2.5 text-sm font-semibold text-white">Show everything</button></div>:<div className="grid grid-cols-1 gap-x-5 gap-y-9 sm:grid-cols-2 lg:grid-cols-4">{filtered.map(p=><ProductCard key={p.id} p={p} wished={wish.includes(p.id)} onWish={()=>toggleWish(p.id)} onAdd={()=>add(p.id)}/>)}</div>}
+          {storeLoading?<div className="rounded-3xl bg-[#f7eeea] px-6 py-16 text-center text-sm text-[#826b74]">Getting the shelf ready…</div>:filtered.length===0?<div className="rounded-3xl bg-[#f7eeea] px-6 py-16 text-center"><p className="serif text-3xl">No little rituals found</p><p className="mt-2 text-sm text-[#826b74]">Try another search or category.</p><button onClick={()=>{setSearch('');setCategory('Everything');}} className="mt-5 rounded-full bg-[#ce4f7d] px-5 py-2.5 text-sm font-semibold text-white">Show everything</button></div>:<div className="grid grid-cols-1 gap-x-5 gap-y-9 sm:grid-cols-2 lg:grid-cols-4">{filtered.map(p=><ProductCard key={p.id} p={p} wished={wish.includes(p.id)} onWish={()=>toggleWish(p.id)} onAdd={()=>add(p.id)}/>)}</div>}
           <div className="mt-12 flex justify-center"><button onClick={()=>{setCategory('Everything');setSearch('');}} className="rounded-full border border-[#d8bdc4] px-6 py-3 text-sm font-semibold hover:border-[#ce4f7d]">See the whole shelf <ArrowRight size={15} className="ml-2 inline"/></button></div>
         </div>
       </section>
@@ -124,12 +171,12 @@ function Home() {
       <section className="px-5 py-16 md:py-20"><div className="mx-auto max-w-[1320px]"><div className="mb-8 flex items-end justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[.22em] text-[#ce4f7d]">A NOTE FROM YOUR SKIN FRIEND</p><h2 className="serif mt-3 text-[42px] md:text-[52px]">Tiny tips, lovely rituals</h2></div><span className="hidden text-xs text-[#9a7b85] md:block">Little reminders, no rulebook.</span></div><div className="grid gap-5 md:grid-cols-3">{[{n:'01 / SLOW DOWN',title:'Give your mask its moment.',body:'Set aside 10–15 minutes to unwind. Follow the directions on your product and rinse when it is time.'},{n:'02 / KEEP IT SIMPLE',title:'A little goes a long way.',body:'Start with clean skin and a comfortable amount. Your routine does not need to be a ten-step production.'},{n:'03 / MAKE IT YOURS',title:'Pick a ritual you enjoy.',body:'A favorite playlist, a cup of tea, or just a quiet few minutes. The best routine is one that feels good to you.'}].map((tip,i)=><article key={tip.n} className={`rounded-[26px] p-7 ${i===1?'bg-[#f4e4e7]':'bg-[#f5eee5]'}`}><p className="text-[10px] font-bold tracking-[.19em] text-[#bd6481]">{tip.n}</p><h3 className="serif mt-6 text-[27px] leading-tight">{tip.title}</h3><p className="mt-3 text-sm leading-6 text-[#806975]">{tip.body}</p></article>)}</div></div></section>
       <section className="overflow-hidden bg-[#e8c2c9] px-5 py-12"><div className="mx-auto flex max-w-[1320px] flex-col items-start justify-between gap-5 md:flex-row md:items-center"><div><p className="text-[10px] font-bold uppercase tracking-[.2em] text-[#8d4c62]">A LITTLE SOMETHING FOR YOU</p><h2 className="serif mt-2 text-[34px] md:text-[42px]">Your next mask moment is 10% sweeter.</h2><p className="mt-2 text-sm text-[#754f5b]">Join our notes for new rituals, little offers, and feel-good reminders.</p></div><Newsletter/></div></section>
       <section id="contact" className="scroll-mt-24 bg-[#fffaf5] px-5 py-16 md:py-20"><div className="mx-auto grid max-w-[1120px] gap-12 md:grid-cols-[.8fr_1.2fr]"><div><p className="text-[10px] font-bold uppercase tracking-[.22em] text-[#ce4f7d]">A HUMAN ON THE OTHER SIDE</p><h2 className="serif mt-3 text-[44px] leading-tight">Say hello,<br/><em>skin friend.</em></h2><p className="mt-4 max-w-[350px] text-sm leading-7 text-[#806975]">Questions about a product or just want to share your favorite mask moment? Leave a note and we'll be in touch.</p><div className="mt-8 space-y-4 border-t border-[#eadbdd] pt-5 text-sm"><p><span className="mr-3 text-[#ce4f7d]">01</span> hello@skinbyjenan.com</p><p><span className="mr-3 text-[#ce4f7d]">02</span> Monday–Friday, 9–5</p></div></div>
-          <form onSubmit={e=>{e.preventDefault();const form=e.currentTarget;if(form.reportValidity()){setSent(true);form.reset();}}} className="rounded-[28px] bg-[#f7eee9] p-6 md:p-8"><div className="grid gap-4 sm:grid-cols-2"><label className="text-xs font-semibold">Your name<input required minLength={2} name="name" placeholder="What should we call you?" className="mt-2 w-full rounded-xl border border-[#e3cfd2] bg-[#fffaf7] px-4 py-3 text-sm font-normal outline-none focus:border-[#ce4f7d]" data-testid="input-contact-name"/></label><label className="text-xs font-semibold">Email address<input required type="email" name="email" placeholder="you@example.com" className="mt-2 w-full rounded-xl border border-[#e3cfd2] bg-[#fffaf7] px-4 py-3 text-sm font-normal outline-none focus:border-[#ce4f7d]" data-testid="input-contact-email"/></label></div><label className="mt-4 block text-xs font-semibold">What's on your mind?<textarea required minLength={10} name="message" rows={4} placeholder="Tell us a little..." className="mt-2 w-full resize-y rounded-xl border border-[#e3cfd2] bg-[#fffaf7] px-4 py-3 text-sm font-normal outline-none focus:border-[#ce4f7d]" data-testid="input-contact-message"/></label>{sent&&<p role="status" className="mt-4 flex items-center gap-2 text-sm font-semibold text-[#527453]"><Check size={16}/> Your note is in. Thanks for saying hello!</p>}<button type="submit" className="mt-5 rounded-full bg-[#ce4f7d] px-6 py-3 text-sm font-semibold text-white hover:bg-[#b83f6b]" data-testid="button-contact-submit">Send your note <ArrowRight size={15} className="ml-2 inline"/></button><p className="mt-3 text-[10px] text-[#917782]">Demo contact form — your message is not sent to a service.</p></form>
+          <form onSubmit={async e=>{e.preventDefault();const form=e.currentTarget;if(!form.reportValidity())return;const values=new FormData(form);try{await submitStoreContact({name:String(values.get('name')??''),email:String(values.get('email')??''),message:String(values.get('message')??'')});setSent(true);setContactError('');form.reset();}catch{setContactError('We could not save your note. Please try again.');}}} className="rounded-[28px] bg-[#f7eee9] p-6 md:p-8"><div className="grid gap-4 sm:grid-cols-2"><label className="text-xs font-semibold">Your name<input required minLength={2} name="name" placeholder="What should we call you?" className="mt-2 w-full rounded-xl border border-[#e3cfd2] bg-[#fffaf7] px-4 py-3 text-sm font-normal outline-none focus:border-[#ce4f7d]" data-testid="input-contact-name"/></label><label className="text-xs font-semibold">Email address<input required type="email" name="email" placeholder="you@example.com" className="mt-2 w-full rounded-xl border border-[#e3cfd2] bg-[#fffaf7] px-4 py-3 text-sm font-normal outline-none focus:border-[#ce4f7d]" data-testid="input-contact-email"/></label></div><label className="mt-4 block text-xs font-semibold">What's on your mind?<textarea required minLength={10} name="message" rows={4} placeholder="Tell us a little..." className="mt-2 w-full resize-y rounded-xl border border-[#e3cfd2] bg-[#fffaf7] px-4 py-3 text-sm font-normal outline-none focus:border-[#ce4f7d]" data-testid="input-contact-message"/></label>{sent&&<p role="status" className="mt-4 flex items-center gap-2 text-sm font-semibold text-[#527453]"><Check size={16}/> Your note is saved for the store team. Thanks for saying hello!</p>}{contactError&&<p role="alert" className="mt-4 text-sm text-[#8c3449]">{contactError}</p>}<button type="submit" className="mt-5 rounded-full bg-[#ce4f7d] px-6 py-3 text-sm font-semibold text-white hover:bg-[#b83f6b]" data-testid="button-contact-submit">Send your note <ArrowRight size={15} className="ml-2 inline"/></button><p className="mt-3 text-[10px] text-[#917782]">Your note is saved in the store database. Replies are handled separately.</p></form>
         </div></section>
     </main>
     <footer className="bg-[#542d3c] px-5 py-10 text-[#fff8f2]"><div className="mx-auto flex max-w-[1320px] flex-col justify-between gap-8 md:flex-row"><div><p className="serif text-3xl">skin by jenan</p><p className="mt-2 text-sm text-[#d9bdc7]">A little mask, A lot of glow</p></div><div className="flex flex-wrap gap-x-8 gap-y-3 text-xs font-semibold text-[#f2dce3]">{nav.map(([label,id])=><button key={id} onClick={()=>scrollTo(id)}>{label}</button>)}<button onClick={()=>scrollTo('contact')}>Contact</button></div><p className="text-[10px] text-[#d9bdc7]">© 2025 Skin by Jenan. Your little ritual starts here.</p></div></footer>
      {(cartOpen||wishOpen||accountOpen)&&<div className="fixed inset-0 z-50 flex justify-end"><button className="absolute inset-0 bg-[#38212c]/45" onClick={()=>{setCartOpen(false);setWishOpen(false);setAccountOpen(false);}} aria-label="Close panel"/><aside className="relative flex h-full w-full max-w-[440px] flex-col bg-[#fffaf5] shadow-2xl"><div className="flex items-center justify-between border-b border-[#eadbdd] px-6 py-5"><div><p className="text-[10px] font-bold uppercase tracking-[.18em] text-[#ce4f7d]">{cartOpen?'YOUR LITTLE BAG':wishOpen?'SAVED FOR LATER':'YOUR ACCOUNT'}</p><h2 className="serif mt-1 text-3xl">{cartOpen?`Your bag (${cartCount})`:wishOpen?`Your wishlist (${wish.length})`:'Hello, skin friend'}</h2></div><button onClick={()=>{setCartOpen(false);setWishOpen(false);setAccountOpen(false);}} className="flex h-10 w-10 items-center justify-center rounded-full hover:bg-[#f2e5e4]" aria-label="Close drawer"><X size={20}/></button></div>
-       <div className="flex-1 overflow-y-auto px-6 py-4">{cartOpen?(cartProducts.length===0?<EmptyPanel title="Your bag is taking a breather." text="Add a little ritual and it will show up here." onClick={()=>{setCartOpen(false);scrollTo('shop');}}/>:cartProducts.map(({product:p,qty})=><div key={p.id} className="flex gap-4 border-b border-[#eadbdd] py-5"><div className={`flex h-24 w-24 shrink-0 items-center justify-center rounded-2xl ${p.color}`}><Jar name={p.name} small/></div><div className="min-w-0 flex-1"><p className="serif text-lg leading-tight">{p.name}</p><p className="mt-1 text-xs text-[#8b707a]">{money(p.price)}</p><div className="mt-3 flex items-center justify-between"><div className="flex items-center gap-3 rounded-full border border-[#e2cfd3] px-2 py-1"><button onClick={()=>changeQty(p.id,-1)} aria-label={`Decrease ${p.name} quantity`}><Minus size={13}/></button><span className="min-w-4 text-center text-xs">{qty}</span><button onClick={()=>changeQty(p.id,1)} aria-label={`Increase ${p.name} quantity`}><Plus size={13}/></button></div><button onClick={()=>setCart(old=>old.filter(r=>r.id!==p.id))} className="text-xs text-[#9b7180] hover:text-[#ce4f7d]"><Trash2 size={15} className="inline"/> Remove</button></div></div></div>)):wishOpen?(wish.length===0?<EmptyPanel title="No saved favorites yet." text="Tap the heart on anything that catches your eye." onClick={()=>{setWishOpen(false);scrollTo('shop');}}/>:wish.map(id=>{const p=productById(id);return <div key={id} className="flex gap-4 border-b border-[#eadbdd] py-5"><div className={`flex h-24 w-24 shrink-0 items-center justify-center rounded-2xl ${p.color}`}><Jar name={p.name} small/></div><div className="flex-1"><p className="serif text-lg">{p.name}</p><p className="mt-1 text-xs">{money(p.price)}</p><div className="mt-3 flex gap-4"><button onClick={()=>add(p.id)} className="text-xs font-bold text-[#ce4f7d]">Add to bag</button><button onClick={()=>toggleWish(p.id)} className="text-xs text-[#9b7180]">Remove</button></div></div></div>})):<div className="mt-4 rounded-[28px] bg-[#f7eee9] p-7"><div className="flex h-14 w-14 items-center justify-center rounded-full bg-[#efd8df] text-[#ce4f7d]"><UserRound size={24}/></div><p className="serif mt-5 text-2xl">Browsing as a guest</p><p className="mt-2 text-sm leading-6 text-[#806975]">Your bag and favorites are saved on this device. Account sign-in is not enabled in this storefront demo.</p><button onClick={()=>{setAccountOpen(false);scrollTo('shop');}} className="mt-5 rounded-full bg-[#542d3c] px-5 py-3 text-sm font-semibold text-white">Explore the shelf <ArrowRight size={15} className="ml-2 inline"/></button></div>}</div>
+       <div className="flex-1 overflow-y-auto px-6 py-4">{cartOpen?(cartProducts.length===0?<EmptyPanel title="Your bag is taking a breather." text="Add a little ritual and it will show up here." onClick={()=>{setCartOpen(false);scrollTo('shop');}}/>:cartProducts.map(({product:p,qty})=><div key={p.id} className="flex gap-4 border-b border-[#eadbdd] py-5"><div className={`flex h-24 w-24 shrink-0 items-center justify-center rounded-2xl ${p.color}`}><Jar name={p.name} small/></div><div className="min-w-0 flex-1"><p className="serif text-lg leading-tight">{p.name}</p><p className="mt-1 text-xs text-[#8b707a]">{money(p.price)}</p><div className="mt-3 flex items-center justify-between"><div className="flex items-center gap-3 rounded-full border border-[#e2cfd3] px-2 py-1"><button onClick={()=>changeQty(p.id,-1)} aria-label={`Decrease ${p.name} quantity`}><Minus size={13}/></button><span className="min-w-4 text-center text-xs">{qty}</span><button onClick={()=>changeQty(p.id,1)} aria-label={`Increase ${p.name} quantity`}><Plus size={13}/></button></div><button onClick={()=>removeCartItem(p.id)} className="text-xs text-[#9b7180] hover:text-[#ce4f7d]"><Trash2 size={15} className="inline"/> Remove</button></div></div></div>)):wishOpen?(wish.length===0?<EmptyPanel title="No saved favorites yet." text="Tap the heart on anything that catches your eye." onClick={()=>{setWishOpen(false);scrollTo('shop');}}/>:wish.map(id=>{const p=productById(id);return <div key={id} className="flex gap-4 border-b border-[#eadbdd] py-5"><div className={`flex h-24 w-24 shrink-0 items-center justify-center rounded-2xl ${p.color}`}><Jar name={p.name} small/></div><div className="flex-1"><p className="serif text-lg">{p.name}</p><p className="mt-1 text-xs">{money(p.price)}</p><div className="mt-3 flex gap-4"><button onClick={()=>add(p.id)} className="text-xs font-bold text-[#ce4f7d]">Add to bag</button><button onClick={()=>toggleWish(p.id)} className="text-xs text-[#9b7180]">Remove</button></div></div></div>})):<div className="mt-4 rounded-[28px] bg-[#f7eee9] p-7"><div className="flex h-14 w-14 items-center justify-center rounded-full bg-[#efd8df] text-[#ce4f7d]"><UserRound size={24}/></div><p className="serif mt-5 text-2xl">Browsing as a guest</p><p className="mt-2 text-sm leading-6 text-[#806975]">Your bag and favorites are saved in your secure browser session. Account sign-in is not enabled in this storefront demo.</p><button onClick={()=>{setAccountOpen(false);scrollTo('shop');}} className="mt-5 rounded-full bg-[#542d3c] px-5 py-3 text-sm font-semibold text-white">Explore the shelf <ArrowRight size={15} className="ml-2 inline"/></button></div>}</div>
        {cartOpen&&<div className="border-t border-[#eadbdd] p-6"><div className="flex justify-between text-sm"><span>Subtotal</span><strong>{money(subtotal)}</strong></div><p className="mt-3 rounded-xl bg-[#f3e8e3] p-3 text-xs leading-5 text-[#775c67]">This is a storefront demo. No checkout or payment is available, and you will not be charged.</p><button onClick={()=>{setCartOpen(false);scrollTo('shop');}} className="mt-4 w-full rounded-full bg-[#542d3c] py-3.5 text-sm font-semibold text-white">Keep browsing <ArrowRight size={15} className="ml-2 inline"/></button></div>}
     </aside></div>}
   </div>;
@@ -144,7 +191,16 @@ function Jar({name,small=false}:{name:string;small?:boolean}) {
 }
 function QuizChoice({value,active,onClick}:{value:string;active:boolean;onClick:()=>void}) { return <button onClick={onClick} className={`rounded-full border px-4 py-2 text-xs font-semibold transition ${active?'border-[#f3bdce] bg-[#f3bdce] text-[#542d3c]':'border-[#9c6f80] text-[#f5e4e9] hover:bg-white/10'}`}>{active&&<Check size={12} className="mr-1 inline"/>}{value}</button>; }
 function EmptyPanel({title,text,onClick}:{title:string;text:string;onClick:()=>void}) { return <div className="flex h-full min-h-[320px] flex-col items-center justify-center text-center"><div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#f3e1e5] text-[#ce4f7d]"><Sparkles size={26}/></div><p className="serif mt-5 text-2xl">{title}</p><p className="mt-2 max-w-[250px] text-sm leading-6 text-[#8b707a]">{text}</p><button onClick={onClick} className="mt-5 rounded-full bg-[#ce4f7d] px-5 py-2.5 text-xs font-bold text-white">Explore the shelf</button></div>; }
-function Newsletter() { const [done,setDone]=useState(false);return done?<p role="status" className="rounded-full bg-[#fffaf5] px-6 py-4 text-sm font-semibold text-[#542d3c]"><Check size={16} className="mr-2 inline"/>You're on the list. See you in your inbox.</p>:<form onSubmit={e=>{e.preventDefault();if(e.currentTarget.reportValidity())setDone(true);}} className="flex w-full max-w-[410px] gap-2"><label className="sr-only" htmlFor="newsletter-email">Email address</label><input required type="email" id="newsletter-email" placeholder="Your email address" className="min-w-0 flex-1 rounded-full border border-[#d6aeb9] bg-[#fffaf5] px-5 py-3 text-sm outline-none focus:border-[#ce4f7d]"/><button className="shrink-0 rounded-full bg-[#542d3c] px-5 py-3 text-sm font-semibold text-white hover:bg-[#754658]">Count me in <ArrowRight size={14} className="ml-1 inline"/></button></form>; }
+function Newsletter() {
+  const [done,setDone]=useState(false);
+  const [error,setError]=useState('');
+  const [saving,setSaving]=useState(false);
+  if(done)return <p role="status" className="rounded-full bg-[#fffaf5] px-6 py-4 text-sm font-semibold text-[#542d3c]"><Check size={16} className="mr-2 inline"/>Your signup has been saved. Thank you!</p>;
+  return <form onSubmit={async e=>{e.preventDefault();const form=e.currentTarget;if(!form.reportValidity())return;const values=new FormData(form);setSaving(true);setError('');try{await subscribeStoreNewsletter({email:String(values.get('email')??'')});setDone(true);form.reset();}catch{setError('We could not save your signup. Please try again.');}finally{setSaving(false);}}} className="w-full max-w-[410px]">
+    <div className="flex gap-2"><label className="sr-only" htmlFor="newsletter-email">Email address</label><input required type="email" id="newsletter-email" name="email" placeholder="Your email address" className="min-w-0 flex-1 rounded-full border border-[#d6aeb9] bg-[#fffaf5] px-5 py-3 text-sm outline-none focus:border-[#ce4f7d]"/><button disabled={saving} className="shrink-0 rounded-full bg-[#542d3c] px-5 py-3 text-sm font-semibold text-white hover:bg-[#754658] disabled:opacity-60">{saving?'Saving…':'Count me in'} <ArrowRight size={14} className="ml-1 inline"/></button></div>
+    {error&&<p role="alert" className="mt-2 text-xs text-[#8c3449]">{error}</p>}
+  </form>;
+}
 function Router() { return <RoutedErrorBoundary><Switch><Route path="/" component={Home}/><Route component={NotFound}/></Switch></RoutedErrorBoundary>; }
 function RoutedErrorBoundary({children}:{children:ReactNode}) { const [location]=useLocation();return <ErrorBoundary resetKey={location}>{children}</ErrorBoundary>; }
 function App() { return <QueryClientProvider client={queryClient}><TooltipProvider><WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/,'')}><Router/></WouterRouter><Toaster/></TooltipProvider></QueryClientProvider>; }

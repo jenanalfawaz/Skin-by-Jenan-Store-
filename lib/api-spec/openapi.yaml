@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: store
+    description: Skin by Jenan storefront operations
 paths:
   /healthz:
     get:
@@ -24,6 +26,158 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /store/products:
+    get:
+      operationId: listStoreProducts
+      tags: [store]
+      summary: List storefront products
+      responses:
+        "200":
+          description: Product catalog
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/StoreProduct"
+  /store/state:
+    get:
+      operationId: getStoreState
+      tags: [store]
+      summary: Get this browser's cart and wishlist
+      responses:
+        "200":
+          description: Current store state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreState"
+  /store/cart/items:
+    post:
+      operationId: addStoreCartItem
+      tags: [store]
+      summary: Add a product to the cart
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CartItemInput"
+      responses:
+        "200":
+          description: Updated store state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreState"
+        "400":
+          description: Invalid cart item
+  /store/cart/items/{productId}:
+    parameters:
+      - name: productId
+        in: path
+        required: true
+        schema:
+          type: string
+    patch:
+      operationId: setStoreCartItemQuantity
+      tags: [store]
+      summary: Set a cart item's quantity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CartQuantityInput"
+      responses:
+        "200":
+          description: Updated store state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreState"
+        "400":
+          description: Invalid quantity
+    delete:
+      operationId: removeStoreCartItem
+      tags: [store]
+      summary: Remove a cart item
+      responses:
+        "200":
+          description: Updated store state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreState"
+  /store/wishlist/items/{productId}:
+    parameters:
+      - name: productId
+        in: path
+        required: true
+        schema:
+          type: string
+    put:
+      operationId: addStoreWishlistItem
+      tags: [store]
+      summary: Save a product to the wishlist
+      responses:
+        "200":
+          description: Updated store state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreState"
+    delete:
+      operationId: removeStoreWishlistItem
+      tags: [store]
+      summary: Remove a product from the wishlist
+      responses:
+        "200":
+          description: Updated store state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreState"
+  /store/contact:
+    post:
+      operationId: submitStoreContact
+      tags: [store]
+      summary: Save a customer contact message
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContactMessageInput"
+      responses:
+        "201":
+          description: Message saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreActionResponse"
+        "400":
+          description: Invalid contact message
+  /store/newsletter:
+    post:
+      operationId: subscribeStoreNewsletter
+      tags: [store]
+      summary: Save a newsletter subscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewsletterInput"
+      responses:
+        "201":
+          description: Subscription saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreActionResponse"
+        "400":
+          description: Invalid email
 components:
   schemas:
     HealthStatus:
@@ -33,4 +187,67 @@ components:
           type: string
       required:
         - status
+    StoreProduct:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        kind: { type: string }
+        price: { type: number }
+        rating: { type: number }
+        reviews: { type: integer }
+        color: { type: string }
+        badge: { type: string }
+        desc: { type: string }
+        ingredients: { type: string }
+        categories:
+          type: array
+          items: { type: string }
+        best: { type: boolean }
+      required: [id, name, kind, price, rating, reviews, color, badge, desc, ingredients, categories, best]
+    StoreCartItem:
+      type: object
+      properties:
+        productId: { type: string }
+        quantity: { type: integer }
+      required: [productId, quantity]
+    StoreState:
+      type: object
+      properties:
+        cart:
+          type: array
+          items:
+            $ref: "#/components/schemas/StoreCartItem"
+        wishlist:
+          type: array
+          items: { type: string }
+      required: [cart, wishlist]
+    CartItemInput:
+      type: object
+      properties:
+        productId: { type: string, minLength: 1 }
+        quantity: { type: integer, minimum: 1, maximum: 99 }
+      required: [productId, quantity]
+    CartQuantityInput:
+      type: object
+      properties:
+        quantity: { type: integer, minimum: 1, maximum: 99 }
+      required: [quantity]
+    ContactMessageInput:
+      type: object
+      properties:
+        name: { type: string, minLength: 2, maxLength: 120 }
+        email: { type: string, format: email, maxLength: 320 }
+        message: { type: string, minLength: 10, maxLength: 5000 }
+      required: [name, email, message]
+    NewsletterInput:
+      type: object
+      properties:
+        email: { type: string, format: email, maxLength: 320 }
+      required: [email]
+    StoreActionResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+      required: [success]
 

@@ -1,6 +1,6 @@
-# [Project name]
+# Skin by Jenan
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+An English-language skincare storefront with a Supabase-backed product catalog, guest cart, wishlist, contact inbox, and newsletter signups.
 
 ## Run & Operate
 
@@ -9,7 +9,7 @@ _Replace the heading above with the project's name, and this line with one sente
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- Required env: `SUPABASE_URL` — Supabase project URL; `SUPABASE_SECRET_KEY` — server-only Supabase key; `SESSION_SECRET` — signs guest-store cookies.
 
 ## Stack
 
@@ -22,23 +22,30 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/skin-by-jenan/` — storefront UI and generated API client usage
+- `artifacts/api-server/src/routes/store.ts` — server-side Supabase integration and store endpoints
+- `lib/api-spec/openapi.yaml` — API contract source of truth
+- `supabase/migrations/` — applied Supabase schema and seed migration
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- The Supabase MCP connection is for agent-side database management; the live storefront calls the shared API server, not MCP.
+- Supabase secret keys stay in Replit Secrets on the API server and never ship to the browser.
+- Guest carts and wishlists use a signed, HTTP-only browser session cookie; customers do not need an account for this demo.
+- Store tables have RLS enabled and no public policies; the server uses its private Supabase key for data access.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- Product browsing, live search, filters, sorting, a mask-matching quiz, and a persistent guest cart and wishlist.
+- Contact messages and newsletter signups are stored in Supabase; no email is sent automatically.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+-
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Keep the Supabase secret key server-side. Do not add `VITE_` prefixes or embed it in the storefront.
 
 ## Pointers
 

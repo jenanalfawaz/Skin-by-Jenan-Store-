@@ -1,6 +1,6 @@
 # Skin by Jenan
 
-An English-language skincare storefront with a Supabase-backed product catalog, guest cart, wishlist, contact inbox, and newsletter signups.
+An English-language skincare storefront with a Supabase-backed product catalog, guest cart, wishlist, contact inbox, newsletter signups, and Supabase Auth.
 
 ## Run & Operate
 
@@ -9,7 +9,7 @@ An English-language skincare storefront with a Supabase-backed product catalog, 
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `SUPABASE_URL` — Supabase project URL; `SUPABASE_SECRET_KEY` — server-only Supabase key; `SESSION_SECRET` — signs guest-store cookies.
+- Required env: `SUPABASE_URL`, server-only `SUPABASE_SECRET_KEY`, and `SESSION_SECRET` for guest-store cookies. The storefront also needs `VITE_SUPABASE_URL` and the browser-safe `VITE_SUPABASE_PUBLISHABLE_KEY` for Supabase Auth.
 
 ## Stack
 
@@ -31,17 +31,14 @@ An English-language skincare storefront with a Supabase-backed product catalog, 
 
 - The Supabase MCP connection is for agent-side database management; the live storefront calls the shared API server, not MCP.
 - Supabase secret keys stay in Replit Secrets on the API server and never ship to the browser.
-- Guest carts and wishlists use a signed, HTTP-only browser session cookie; customers do not need an account for this demo.
+- Guest carts and wishlists use a signed, HTTP-only browser session cookie. Supabase Auth supports account registration and sign-in, but carts and wishlists are not yet linked to customer accounts.
 - Store tables have RLS enabled and no public policies; the server uses its private Supabase key for data access.
+- The storefront may use the Supabase publishable key for Auth; never expose `SUPABASE_SECRET_KEY` in browser code.
 
 ## Product
 
-- Product browsing, live search, filters, sorting, a mask-matching quiz, and a persistent guest cart and wishlist.
+- Product browsing, live search, filters, sorting, a mask-matching quiz, Supabase Auth, and a persistent guest cart and wishlist.
 - Contact messages and newsletter signups are stored in Supabase; no email is sent automatically.
-
-## User preferences
-
--
 
 ## Gotchas
 

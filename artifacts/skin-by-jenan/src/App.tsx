@@ -11,7 +11,7 @@ import {
   addStoreCartItem,
   addStoreWishlistItem,
   getStoreState,
-  listStoreProducts,
+  listCatalogProducts,
   removeStoreCartItem,
   removeStoreWishlistItem,
   setStoreCartItemQuantity,
@@ -47,15 +47,21 @@ function Home() {
   const [contactError,setContactError] = useState('');
   useEffect(()=>{
     let active=true;
-    Promise.all([listStoreProducts(),getStoreState()])
-      .then(([catalog,state])=>{
+    Promise.allSettled([listCatalogProducts(),getStoreState()])
+      .then(([catalogResult,stateResult])=>{
         if(!active)return;
-        setProducts(catalog);
-        applyStoreState(state);
-        setStoreError('');
-      })
-      .catch(()=>{
-        if(active)setStoreError('The store could not load right now. Please try refreshing the page.');
+        if(catalogResult.status==='fulfilled') setProducts(catalogResult.value);
+        if(stateResult.status==='fulfilled') {
+          setCart(stateResult.value.cart.map(item=>({id:item.productId,qty:item.quantity})));
+          setWish(stateResult.value.wishlist);
+        }
+        if(catalogResult.status==='rejected') {
+          setStoreError('The product catalog could not load. Please try refreshing the page.');
+        } else if(stateResult.status==='rejected') {
+          setStoreError('Products are available, but your bag and wishlist need the store service to be deployed.');
+        } else {
+          setStoreError('');
+        }
       })
       .finally(()=>{if(active)setStoreLoading(false);});
     return ()=>{active=false;};
@@ -71,7 +77,7 @@ function Home() {
   const filtered=useMemo(()=>products.filter(p=>{
     const text=`${p.name} ${p.kind} ${p.ingredients} ${p.categories.join(' ')}`.toLowerCase();
     return text.includes(search.toLowerCase()) && (category==='Everything'||(category==='Best sellers'&&p.best)||p.categories.includes(category)) && (category!=='Best sellers'||p.best);
-  }).sort((a,b)=>sort==='Price: low to high'?a.price-b.price:sort==='Price: high to low'?b.price-a.price:0),[search,category,sort]);
+  }).sort((a,b)=>sort==='Price: low to high'?a.price-b.price:sort==='Price: high to low'?b.price-a.price:0),[products,search,category,sort]);
   const add=async(id:string)=>{
     try { applyStoreState(await addStoreCartItem({productId:id,quantity:1})); }
     catch { setStoreError('We could not add that item to your bag. Please try again.'); }
